@@ -1,0 +1,91 @@
+{
+  "name": "WhatsApp Bot - Claude + Twilio",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-001",
+      "name": "Webhook Twilio",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "whatsapp-webhook"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body;\nreturn [{\n  json: {\n    mensaje: body.Body || '',\n    de: body.From || '',\n    para: body.To || ''\n  }\n}];"
+      },
+      "id": "node-002",
+      "name": "Extraer datos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const { mensaje } = $input.first().json;\nconst apiKey = $env.ANTHROPIC_API_KEY;\n\nconst response = await fetch('https://api.anthropic.com/v1/messages', {\n  method: 'POST',\n  headers: {\n    'x-api-key': apiKey,\n    'anthropic-version': '2023-06-01',\n    'content-type': 'application/json'\n  },\n  body: JSON.stringify({\n    model: 'claude-sonnet-4-6',\n    max_tokens: 1024,\n    messages: [{ role: 'user', content: mensaje }]\n  })\n});\n\nconst data = await response.json();\nconst respuesta = data.content[0].text;\n\nreturn [{\n  json: {\n    respuesta,\n    ...$input.first().json\n  }\n}];"
+      },
+      "id": "node-003",
+      "name": "Llamar Claude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const { respuesta, de, para } = $input.first().json;\nconst accountSid = $env.TWILIO_ACCOUNT_SID;\nconst authToken = $env.TWILIO_AUTH_TOKEN;\n\nconst credentials = Buffer.from(`${accountSid}:${authToken}`).toString('base64');\n\nconst body = new URLSearchParams({\n  From: para,\n  To: de,\n  Body: respuesta\n}).toString();\n\nconst response = await fetch(\n  `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,\n  {\n    method: 'POST',\n    headers: {\n      'Authorization': `Basic ${credentials}`,\n      'Content-Type': 'application/x-www-form-urlencoded'\n    },\n    body\n  }\n);\n\nconst data = await response.json();\nreturn [{ json: { sid: data.sid, status: data.status } }];"
+      },
+      "id": "node-004",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response></Response>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/xml"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-005",
+      "name": "Responder Twilio",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Twilio": {
+      "main": [[{"node": "Extraer datos", "type": "main", "index": 0}]]
+    },
+    "Extraer datos": {
+      "main": [[{"node": "Llamar Claude", "type": "main", "index": 0}]]
+    },
+    "Llamar Claude": {
+      "main": [[{"node": "Enviar WhatsApp", "type": "main", "index": 0}]]
+    },
+    "Enviar WhatsApp": {
+      "main": [[{"node": "Responder Twilio", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
